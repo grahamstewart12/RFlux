@@ -1,19 +1,51 @@
 
 mahrt <- function(x) {
-	x <- na.omit(x,na.rm=TRUE)
-	ifelse(nrow(x)>20000, WL <- 5995, WL <- 2995)
-	COV <- cov(x[,1],x[,2],  use="complete.obs")
-	COVs <- rollapply(x, FUN=function(x) cov(x[,1], x[,2],  use="complete.obs"), width=WL, by=WL,by.column=FALSE)
-	COVw <- rollapply(x, FUN=function(x) cov(x[,1], x[,2],  use="complete.obs"), width=WL/6, by=WL/6,by.column=FALSE)
-	sigmaB <- sqrt(sum((COVs - COV)^2)/(length(COVs)-1))
-	ifelse(length(COVw)>=6, sigmaW1 <- sqrt(1/5*sum((COVw[1:6]-COVs[1])^2)), sigmaW1 <- NA)
-	ifelse(length(COVw)>=12, sigmaW2 <- sqrt(1/5*sum((COVw[7:12]-COVs[2])^2)), sigmaW2 <- NA)
-	ifelse(length(COVw)>=18, sigmaW3 <- sqrt(1/5*sum((COVw[13:18]-COVs[3])^2)), sigmaW3 <- NA)
-	ifelse(length(COVw)>=24, sigmaW4 <- sqrt(1/5*sum((COVw[19:24]-COVs[4])^2)), sigmaW4 <- NA)
-	ifelse(length(COVw)>=30, sigmaW5 <- sqrt(1/5*sum((COVw[25:30]-COVs[5])^2)), sigmaW5 <- NA)
-	ifelse(length(COVw)>30 & length(COVw)<=36, sigmaW6 <- sqrt(1/length(COVw)*sum((COVw[31:length(COVw)]-COVs[6])^2)), sigmaW6 <- NA)
-	sigmaWi <- c(sigmaW1, sigmaW2, sigmaW3, sigmaW4, sigmaW5, sigmaW6)
-	sigmaW <- mean(sigmaWi, na.rm=TRUE)
-	stat <- sigmaB/(sigmaW/sqrt(length(na.omit(sigmaWi))))
-	return(list("M98"=stat))
-	}
+  x <- na.omit(x, na.rm = TRUE)
+  ifelse(nrow(x) > 20000, wl <- 5995, wl <- 2995)
+  cov <- cov(x[, 1], x[, 2], use = "complete.obs")
+  covs <- zoo::rollapply(
+    x, FUN = function(x) cov(x[, 1], x[, 2], use = "complete.obs"), 
+    width = wl, by = wl, by.column = FALSE
+  )
+  cov_w <- zoo::rollapply(
+    x, FUN = function(x) cov(x[, 1], x[, 2], use = "complete.obs"), 
+    width = wl / 6, by = wl / 6, by.column = FALSE
+  )
+  sigma_b <- sqrt(sum((covs - cov)^2) / (length(covs) - 1))
+  cov_w_len <- length(cov_w)
+  ifelse(
+    cov_w_len >= 6, 
+    sigma_w1 <- sqrt(1 / 5 * sum((cov_w[1:6] - covs[1])^2)), 
+    sigma_w1 <- NA
+  )
+  ifelse(
+    cov_w_len >= 12, 
+    sigma_w2 <- sqrt(1 / 5 * sum((cov_w[7:12] - covs[2])^2)), 
+    sigma_w2 <- NA
+  )
+  ifelse(
+    cov_w_len >= 18, 
+    sigma_w3 <- sqrt(1 / 5 * sum((cov_w[13:18] - covs[3])^2)), 
+    sigma_w3 <- NA
+  )
+  ifelse(
+    cov_w_len >= 24, 
+    sigma_w4 <- sqrt(1 / 5 * sum((cov_w[19:24] - covs[4])^2)), 
+    sigma_w4 <- NA
+  )
+  ifelse(
+    cov_w_len >= 30, 
+    sigma_w5 <- sqrt(1 / 5 * sum((cov_w[25:30] - covs[5])^2)), 
+    sigma_w5 <- NA
+  )
+  ifelse(
+    cov_w_len > 30 & length(cov_w) <= 36, 
+    sigma_w6 <- sqrt(1 / cov_w_len * sum((cov_w[31:cov_w_len] - covs[6])^2)), 
+    sigma_w6 <- NA
+  )
+  sigma_wi <- c(sigma_w1, sigma_w2, sigma_w3, sigma_w4, sigma_w5, sigma_w6)
+  sigma_w <- mean(sigma_wi, na.rm = TRUE)
+  stat <- sigma_b / (sigma_w / sqrt(length(na.omit(sigma_wi))))
+  
+  list("M98" = stat)
+}
