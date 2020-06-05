@@ -1,6 +1,7 @@
 
 
-cleanFlux <- function(path_workset, path_ecmd, path_output=NULL, FileName=NULL, plotQC=FALSE, storage=FALSE){
+cleanFlux <- function(path_workset, path_ecmd, path_output = NULL, 
+                      FileName = NULL, plotQC = FALSE, storage = FALSE){
 
 ec_data0 <- fread(path_workset, sep=",", header=TRUE, data.table=FALSE, na.strings=c(NA, "-9999"))
 timestamp_ec_data0 <- as.POSIXct(as.character(ec_data0[,1]), format="%Y%m%d%H%M", tz="GMT")
