@@ -2,8 +2,14 @@
 
 clean_flux <- function(path_workset, path_ecmd, path_output = NULL,
                       file_name = NULL, plot_qc = FALSE, storage = FALSE) {
-  ec_data0 <- fread(path_workset, sep = ",", header = TRUE, data.table = FALSE, na.strings = c(NA, "-9999"))
-  timestamp_ec_data0 <- as.POSIXct(as.character(ec_data0[, 1]), format = "%Y%m%d%H%M", tz = "GMT")
+  
+  ec_data0 <- data.table::fread(
+    path_workset, sep = ",", header = TRUE, data.table = FALSE, 
+    na.strings = c(NA, "-9999")
+  )
+  timestamp_ec_data0 <- as.POSIXct(
+    as.character(ec_data0[, 1]), format = "%Y%m%d%H%M", tz = "GMT"
+  )
   ec_data0.xts::xts <- xts::xts(ec_data0, order.by = timestamp_ec_data0)[, -1]
 
   t_start <- timestamp_ec_data0[1]
@@ -13,8 +19,17 @@ clean_flux <- function(path_workset, path_ecmd, path_output = NULL,
   reg_ts <- xts::xts(rep(1, length(reg_timestamp)), order.by = reg_timestamp)
 
   ## Building time series of wind sector to exclude
-  md_tmp <- fread(path_ecmd, integer64 = "numeric", data.table = FALSE, na.strings = c(NA, "-9999"))
-  md_tmp0 <- rbind(md_tmp, replace(md_tmp[nrow(md_tmp), ], 2, as.character(format(Sys.time(), "%Y%m%d%H", tz = "GMT"))), make.row.names = FALSE)
+  md_tmp <- data.table::fread(
+    path_ecmd, integer64 = "numeric", data.table = FALSE, 
+    na.strings = c(NA, "-9999")
+  )
+  md_tmp0 <- rbind(
+    md_tmp, replace(
+      md_tmp[nrow(md_tmp), ], 2, 
+      as.character(format(Sys.time(), "%Y%m%d%H", tz = "GMT"))
+    ), 
+    make.row.names = FALSE
+  )
   site <- md_tmp[1, "SITEID"]
 
   time_S <- as.POSIXct("2000010100", format = "%Y%m%d%H", tz = "GMT")
@@ -27,7 +42,17 @@ clean_flux <- function(path_workset, path_ecmd, path_output = NULL,
 
 
   for (i in 1:(nrow(md_tmp0) - 1)) {
-    time_S0 <- seq(strptime(substr(as.character(md_tmp0[i, "DATE_OF_VARIATION_EF"]), 1, 8), format = "%Y%m%d", tz = "GMT"), strptime(substr(as.character(md_tmp0[i + 1, "DATE_OF_VARIATION_EF"]), 1, 8), format = "%Y%m%d", tz = "GMT") - 1800, by = "30 min")
+    time_S0 <- seq(
+      strptime(
+        substr(as.character(md_tmp0[i, "DATE_OF_VARIATION_EF"]), 1, 8), 
+        format = "%Y%m%d", tz = "GMT"
+      ), 
+      strptime(
+        substr(as.character(md_tmp0[i + 1, "DATE_OF_VARIATION_EF"]), 1, 8), 
+        format = "%Y%m%d", tz = "GMT"
+      ) - 1800, 
+      by = "30 min"
+    )
     time_S <- c(time_S, time_S0)
     WS2E_c0 <- rep(md_tmp0[i, "SA_INVALID_WIND_SECTOR_c1"], length(time_S0))
     WS2E_w0 <- rep(md_tmp0[i, "SA_INVALID_WIND_SECTOR_w1"], length(time_S0))
@@ -43,8 +68,13 @@ clean_flux <- function(path_workset, path_ecmd, path_output = NULL,
     WS2E_w3 <- c(WS2E_w3, WS2E_w0)
   }
 
-  windsect2excl.xts::xts <- xts::xts(cbind(WS2E_c1, WS2E_w1, WS2E_c2, WS2E_w2, WS2E_c3, WS2E_w3), order.by = time_S[-1])
-  wind_sector_exclusion.xts::xts <- window(windsect2excl.xts::xts, start = t_start, end = t_end)
+  windsect2excl.xts::xts <- xts::xts(
+    cbind(WS2E_c1, WS2E_w1, WS2E_c2, WS2E_w2, WS2E_c3, WS2E_w3), 
+    order.by = time_S[-1]
+  )
+  wind_sector_exclusion.xts::xts <- window(
+    windsect2excl.xts::xts, start = t_start, end = t_end
+  )
 
   ec_data <- merge(reg_ts, ec_data0.xts::xts, wind_sector_exclusion.xts::xts, tzone = "GMT")[, -1]
 
@@ -89,12 +119,36 @@ clean_flux <- function(path_workset, path_ecmd, path_output = NULL,
   WDir2Exc_2 <- c()
   WDir2Exc_3 <- c()
   WDir <- as.vector(ec_data[, "WDir"])
-  w1_l <- as.numeric(ifelse(ec_data[, "WS2E_c1"] - ec_data[, "WS2E_w1"] / 2 <= 0, ec_data[, "WS2E_c1"] - ec_data[, "WS2E_w1"] / 2 + 360, ec_data[, "WS2E_c1"] - ec_data[, "WS2E_w1"] / 2))
-  w1_u <- as.numeric(ifelse(ec_data[, "WS2E_c1"] + ec_data[, "WS2E_w1"] / 2 >= 360, ec_data[, "WS2E_c1"] + ec_data[, "WS2E_w1"] / 2 - 360, ec_data[, "WS2E_c1"] + ec_data[, "WS2E_w1"] / 2))
-  w2_l <- as.numeric(ifelse(ec_data[, "WS2E_c2"] - ec_data[, "WS2E_w2"] / 2 <= 0, ec_data[, "WS2E_c2"] - ec_data[, "WS2E_w2"] / 2 + 360, ec_data[, "WS2E_c2"] - ec_data[, "WS2E_w2"] / 2))
-  w2_u <- as.numeric(ifelse(ec_data[, "WS2E_c2"] + ec_data[, "WS2E_w2"] / 2 >= 360, ec_data[, "WS2E_c2"] + ec_data[, "WS2E_w2"] / 2 - 360, ec_data[, "WS2E_c2"] + ec_data[, "WS2E_w2"] / 2))
-  w3_l <- as.numeric(ifelse(ec_data[, "WS2E_c3"] - ec_data[, "WS2E_w3"] / 2 <= 0, ec_data[, "WS2E_c3"] - ec_data[, "WS2E_w2"] / 2 + 360, ec_data[, "WS2E_c3"] - ec_data[, "WS2E_w3"] / 2))
-  w3_u <- as.numeric(ifelse(ec_data[, "WS2E_c3"] + ec_data[, "WS2E_w3"] / 2 >= 360, ec_data[, "WS2E_c3"] + ec_data[, "WS2E_w2"] / 2 - 360, ec_data[, "WS2E_c3"] + ec_data[, "WS2E_w3"] / 2))
+  w1_l <- as.numeric(ifelse(
+    ec_data[, "WS2E_c1"] - ec_data[, "WS2E_w1"] / 2 <= 0, 
+    ec_data[, "WS2E_c1"] - ec_data[, "WS2E_w1"] / 2 + 360, 
+    ec_data[, "WS2E_c1"] - ec_data[, "WS2E_w1"] / 2
+  ))
+  w1_u <- as.numeric(ifelse(
+    ec_data[, "WS2E_c1"] + ec_data[, "WS2E_w1"] / 2 >= 360, 
+    ec_data[, "WS2E_c1"] + ec_data[, "WS2E_w1"] / 2 - 360, 
+    ec_data[, "WS2E_c1"] + ec_data[, "WS2E_w1"] / 2
+  ))
+  w2_l <- as.numeric(ifelse(
+    ec_data[, "WS2E_c2"] - ec_data[, "WS2E_w2"] / 2 <= 0, 
+    ec_data[, "WS2E_c2"] - ec_data[, "WS2E_w2"] / 2 + 360, 
+    ec_data[, "WS2E_c2"] - ec_data[, "WS2E_w2"] / 2
+  ))
+  w2_u <- as.numeric(ifelse(
+    ec_data[, "WS2E_c2"] + ec_data[, "WS2E_w2"] / 2 >= 360, 
+    ec_data[, "WS2E_c2"] + ec_data[, "WS2E_w2"] / 2 - 360, 
+    ec_data[, "WS2E_c2"] + ec_data[, "WS2E_w2"] / 2
+  ))
+  w3_l <- as.numeric(ifelse(
+    ec_data[, "WS2E_c3"] - ec_data[, "WS2E_w3"] / 2 <= 0, 
+    ec_data[, "WS2E_c3"] - ec_data[, "WS2E_w2"] / 2 + 360, 
+    ec_data[, "WS2E_c3"] - ec_data[, "WS2E_w3"] / 2
+  ))
+  w3_u <- as.numeric(ifelse(
+    ec_data[, "WS2E_c3"] + ec_data[, "WS2E_w3"] / 2 >= 360, 
+    ec_data[, "WS2E_c3"] + ec_data[, "WS2E_w2"] / 2 - 360, 
+    ec_data[, "WS2E_c3"] + ec_data[, "WS2E_w3"] / 2
+  ))
 
   WDir2Exc_1 <- c(intersect(which(w1_u - w1_l > 0 & !is.na(w1_u - w1_l)), which(WDir > w1_l & WDir < w1_u)), intersect(which(w1_u - w1_l < 0 & !is.na(w1_u - w1_l)), which(WDir > w1_l | WDir < w1_u)))
   WDir2Exc_2 <- c(intersect(which(w2_u - w2_l > 0 & !is.na(w2_u - w2_l)), which(WDir > w2_l & WDir < w2_u)), intersect(which(w2_u - w2_l < 0 & !is.na(w2_u - w2_l)), which(WDir > w2_l | WDir < w2_u)))
@@ -114,11 +168,11 @@ clean_flux <- function(path_workset, path_ecmd, path_output = NULL,
   INT_H_ModEr <- union(which(H_FMR_FLAG == 1), which(H_LGD_FLAG == 1))
 
 
-  #################################################################################################################################################################################################################
+  ##############################################################################
   #
   #  Instrumental Problem Detection by means of LSR, KID and SC tests
   #
-  #################################################################################################################################################################################################################
+  ##############################################################################
 
   LSR_H_SevEr <- which(ec_data[, "LSR_H"] <= 0.99)
   LSR_LE_SevEr <- which(ec_data[, "LSR_LE"] <= 0.99)
@@ -131,9 +185,15 @@ clean_flux <- function(path_workset, path_ecmd, path_output = NULL,
 
   KTHs <- 50
   KID_V_SevEr <- which(ec_data[, "KID1_v"] >= KTHs)
-  KID_H_SevEr <- union(which(ec_data[, "KID1_w"] >= KTHs), which(ec_data[, "KID1_ts"] >= KTHs))
-  KID_LE_SevEr <- union(which(ec_data[, "KID1_w"] >= KTHs), which(ec_data[, "KID1_h2o"] >= KTHs))
-  KID_NEE_SevEr <- union(which(ec_data[, "KID1_w"] >= KTHs), which(ec_data[, "KID1_co2"] >= KTHs))
+  KID_H_SevEr <- union(
+    which(ec_data[, "KID1_w"] >= KTHs), which(ec_data[, "KID1_ts"] >= KTHs)
+  )
+  KID_LE_SevEr <- union(
+    which(ec_data[, "KID1_w"] >= KTHs), which(ec_data[, "KID1_h2o"] >= KTHs)
+  )
+  KID_NEE_SevEr <- union(
+    which(ec_data[, "KID1_w"] >= KTHs), which(ec_data[, "KID1_co2"] >= KTHs)
+  )
 
   KTHm <- 30
   KID_V_ModEr <- which(ec_data[, "KID1_v"] >= KTHm)
@@ -189,11 +249,11 @@ clean_flux <- function(path_workset, path_ecmd, path_output = NULL,
   FOOTFLAG <- replace(zero_vector, union(union(HF_V_ModEr, HD_V_ModEr), KID_V_ModEr), 1)
 
 
-  #################################################################################################################################################################################################################
+  ##############################################################################
   #
   # Stationarity Test
   #
-  #################################################################################################################################################################################################################
+  ##############################################################################
 
   ST_NEE_SevEr <- which(ec_data[, "M98_Fc"] > 3)
   ST_LE_SevEr <- which(ec_data[, "M98_LE"] > 3)
@@ -203,20 +263,20 @@ clean_flux <- function(path_workset, path_ecmd, path_output = NULL,
   ST_LE_ModEr <- which(ec_data[, "M98_LE"] > 2 & ec_data[, "M98_LE"] <= 3)
   ST_H_ModEr <- which(ec_data[, "M98_H"] > 2 & ec_data[, "M98_H"] <= 3)
 
-  #################################################################################################################################################################################################################
+  ##############################################################################
   #
   # ITC Test
   #
-  #################################################################################################################################################################################################################
+  ##############################################################################
 
   ITC_SevEr <- which(ec_data[, "itc_w"] >= 100)
   ITC_ModEr <- which(ec_data[, "itc_w"] > 30 & ec_data[, "itc_w"] < 100)
 
-  #################################################################################################################################################################################################################
+  ##############################################################################
   #
   #  SevEr and ModEr indices
   #
-  #################################################################################################################################################################################################################
+  ##############################################################################
 
   NEE_SevEr_ind <- union(union(union(union(INT_NEE_SevEr, LSR_NEE_SevEr), SC_NEE_SevEr), ITC_SevEr), ST_NEE_SevEr)
   NEE_SevEr_flag <- replace(zero_vector, NEE_SevEr_ind, rep(1, length(NEE_SevEr_ind)))
@@ -243,11 +303,11 @@ clean_flux <- function(path_workset, path_ecmd, path_output = NULL,
   H_ModEr_flag <- replace(replace(zero_vector, H_ModEr_ind, rep(1, length(H_ModEr_ind))), H_SevEr_ind, NA)
   length(which(H_ModEr_flag == 1)) / N * 100
 
-  #################################################################################################################################################################################################################
+  ##############################################################################
   #
   # Filtering for severe flags
   #
-  #################################################################################################################################################################################################################
+  ##############################################################################
   NEE1 <- replace(as.vector(NEE_raw), INT_NEE_SevEr, NA)
   NEE2 <- replace(NEE1, LSR_NEE_SevEr, NA)
   NEE3 <- replace(NEE2, SC_NEE_SevEr, NA)
@@ -278,11 +338,11 @@ clean_flux <- function(path_workset, path_ecmd, path_output = NULL,
   H5 <- replace(H4, ST_H_SevEr, NA)
 
 
-  #################################################################################################################################################################################################################
+  ##############################################################################
   #
   ## OUTLIER DETECTION
   #
-  #################################################################################################################################################################################################################
+  ##############################################################################
 
   if (N < 48 * 10) {
     warning(call. = FALSE, "Outlier detection procedure as described in Vitale et al (2019) is performed when data cover a period of at least 10 consecutive days")
@@ -375,11 +435,11 @@ clean_flux <- function(path_workset, path_ecmd, path_output = NULL,
   }
 
 
-  #################################################################################################################################################################################################################
+  ##############################################################################
   #
   # Plot functions
   #
-  #################################################################################################################################################################################################################
+  ##############################################################################
   if (plot_qc == TRUE) {
     YLIM <- c(max(-100, min(NEE_cleaned, na.rm = TRUE) * 1.5), min(70, max(NEE_cleaned, na.rm = TRUE) * 2.5))
     if (diff(range(NEE_cleaned, na.rm = TRUE)) < 20) step <- 5

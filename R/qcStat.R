@@ -1,6 +1,7 @@
 
 qc_stat <- function(path_rawdata, ext_tstamp = c("START", "END"), 
                     path_output = NULL, file_name = NULL) {
+  
   if (ext_tstamp == "START") {
     tstamp <- as.character(format(strptime(
       stringr::str_sub(path_rawdata, -20, -9), format = "%Y%m%d%H%M", tz = "GMT"
@@ -12,44 +13,46 @@ qc_stat <- function(path_rawdata, ext_tstamp = c("START", "END"),
     ) - 1800, "%Y%m%d%H%M", tz = "GMT"))
   } 
 
-  ##################################################################################################################################################################################################################################################
+  ##############################################################################
   # 	Raw Data Processing
-  ##################################################################################################################################################################################################################################################
+  ##############################################################################
 
-  raw_data <- fread(path_rawdata, sep = ",", header = TRUE, data.table = FALSE, na.strings = c("-9999"))
+  raw_data <- data.table::fread(
+    path_rawdata, sep = ",", header = TRUE, data.table = FALSE, 
+    na.strings = c("-9999")
+  )
   n <- nrow(raw_data)
   ifelse(n > 19000, HZ <- 20, HZ <- 10)
   N <- max(HZ * 60 * 30, n)
 
   ifelse(n < N, delta <- N - n, delta <- 0)
-  ifelse(length(which(is.na(raw_data$W + raw_data$T_SONIC))) == n, {
-    fmr_h <- 100
-    lgd_h <- 1800
-  }, {
-    stat_h <- imputeTS::statsNA(
-      raw_data$W + raw_data$T_SONIC, printOnly = FALSE
-    )
-    fmr_h <- (stat_h$numberNAs + delta) / N * 100
-    lgd_h <- max(delta, stat_h$naGapLongest, na.rm = TRUE) / HZ
-  })
-  ifelse(length(which(is.na(raw_data$W + raw_data$CO2))) == n,
-    {
+  ifelse(
+    length(which(is.na(raw_data$W + raw_data$T_SONIC))) == n, {
+      fmr_h <- 100
+      lgd_h <- 1800
+    }, {
+      stat_h <- imputeTS::statsNA(
+        raw_data$W + raw_data$T_SONIC, printOnly = FALSE
+      )
+      fmr_h <- (stat_h$numberNAs + delta) / N * 100
+      lgd_h <- max(delta, stat_h$naGapLongest, na.rm = TRUE) / HZ
+    }
+  )
+  ifelse(
+    length(which(is.na(raw_data$W + raw_data$CO2))) == n, {
       fmr_fc <- 100
       lgd_fc <- 1800
-    },
-    {
+    }, {
       stat_fc <- imputeTS::statsNA(raw_data$W + raw_data$CO2, printOnly = FALSE)
       fmr_fc <- (stat_fc$numberNAs + delta) / N * 100
       lgd_fc <- max(delta, stat_fc$naGapLongest, na.rm = TRUE) / HZ
     }
   )
   ifelse(
-    length(which(is.na(raw_data$W + raw_data$H2O))) == n,
-    {
+    length(which(is.na(raw_data$W + raw_data$H2O))) == n, {
       fmr_le <- 100
       lgd_le <- 1800
-    },
-    {
+    }, {
       stat_le <- imputeTS::statsNA(raw_data$W + raw_data$H2O, printOnly = FALSE)
       fmr_le <- (stat_le$numberNAs + delta) / N * 100
       lgd_le <- max(delta, stat_le$naGapLongest, na.rm = TRUE) / HZ
@@ -107,15 +110,13 @@ qc_stat <- function(path_rawdata, ext_tstamp = c("START", "END"),
   )
 
   ifelse(
-    fmr_fc > 15 | lgd_fc > 180,
-    {
+    fmr_fc > 15 | lgd_fc > 180, {
       D0_fc <- NA
       lrt_fc <- NA
       IPT_co2 <- rep(NA, 8)
       M98_fc <- NA
       COV_wco2 <- NA
-    },
-    {
+    }, {
       ind_w <- which(diff(raw_data$W) == 0) + 1
       ind_co2 <- which(diff(raw_data$CO2) == 0) + 1
       D0_fc <- max(length(ind_w), length(ind_co2))
@@ -123,11 +124,9 @@ qc_stat <- function(path_rawdata, ext_tstamp = c("START", "END"),
         raw_data$W, raw_data$CO2, na.action = na.pass, L, plot = FALSE
       )$acf
       ifelse(
-        D0_fc < N * 0.9,
-        {
+        D0_fc < N * 0.9, {
           ifelse(
-            D0_fc > 0,
-            {
+            D0_fc > 0, {
               CORsub <- ccf(
                 replace(raw_data$W, ind_w, NA), 
                 replace(raw_data$CO2, ind_co2, NA), 
@@ -148,25 +147,23 @@ qc_stat <- function(path_rawdata, ext_tstamp = c("START", "END"),
   )
 
   ifelse(
-    fmr_le > 15 | lgd_le > 180,
-    {
+    fmr_le > 15 | lgd_le > 180, {
       D0_le <- NA
       lrt_le <- NA
       IPT_h2o <- rep(NA, 8)
       M98_le <- NA
       COV_wh2o <- NA
-    },
-    {
+    }, {
       ind_w <- which(diff(raw_data$W) == 0) + 1
       ind_h2o <- which(diff(raw_data$H2O) == 0) + 1
       D0_le <- max(length(ind_w), length(ind_h2o))
       CORori <- ccf(
         raw_data$W, raw_data$H2O, na.action = na.pass, L, plot = FALSE
       )$acf
-      ifelse(D0_le < N * 0.9,
-        {
-          ifelse(D0_le > 0,
-            {
+      ifelse(
+        D0_le < N * 0.9, {
+          ifelse(
+            D0_le > 0, {
               CORsub <- ccf(
                 replace(raw_data$W, ind_w, NA), 
                 replace(raw_data$H2O, ind_h2o, NA), 
@@ -179,7 +176,6 @@ qc_stat <- function(path_rawdata, ext_tstamp = c("START", "END"),
         },
         lrt_le <- -1
       )
-
       IPT_h2o <- inst_prob_test(raw_data$H2O)
       M98_le <- mahrt(data.frame(raw_data$W, raw_data$H2O))
       COV_wh2o <- cov(raw_data$W, raw_data$H2O, use = "complete.obs")
