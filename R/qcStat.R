@@ -21,198 +21,97 @@ qc_stat <- function(path_rawdata, ext_tstamp = c("START", "END"),
     path_rawdata, sep = ",", header = TRUE, data.table = FALSE, 
     na.strings = c("-9999")
   )
+  
   n <- nrow(raw_data)
-  ifelse(n > 19000, HZ <- 20, HZ <- 10)
+  HZ <- if (n > 19000) 20 else 10
   N <- max(HZ * 60 * 30, n)
-
-  ifelse(n < N, delta <- N - n, delta <- 0)
-  ifelse(
-    length(which(is.na(raw_data$W + raw_data$T_SONIC))) == n, {
-      fmr_h <- 100
-      lgd_h <- 1800
-    }, {
-      stat_h <- imputeTS::statsNA(
-        raw_data$W + raw_data$T_SONIC, printOnly = FALSE
+  delta <- if (n < N) N - n else 0
+  
+  fluxes <- c(H = "T_SONIC", FC = "CO2", LE = "H2O", Fch4 = "CH4")
+  fmr <- vctrs::vec_init(numeric(), length(fluxes))
+  lgd <- vctrs::vec_init(numeric(), length(fluxes))
+  for (i in 1:length(fluxes)) {
+    if (length(which(is.na(raw_data$W + raw_data[, fluxes[i]]))) == n) {
+      fmr[i] <- 100
+      lgd[i] <- 1800
+    } else {
+      stat_temp <- imputeTS::statsNA(
+        raw_data$W + raw_data[, fluxes[i]], printOnly = FALSE
       )
-      fmr_h <- (stat_h$numberNAs + delta) / N * 100
-      lgd_h <- max(delta, stat_h$naGapLongest, na.rm = TRUE) / HZ
+      fmr[i] <- (stat_temp$numberNAs + delta) / N * 100
+      lg[i] <- max(delta, stat_temp$naGapLongest, na.rm = TRUE) / HZ
     }
-  )
-  ifelse(
-    length(which(is.na(raw_data$W + raw_data$CO2))) == n, {
-      fmr_fc <- 100
-      lgd_fc <- 1800
-    }, {
-      stat_fc <- imputeTS::statsNA(raw_data$W + raw_data$CO2, printOnly = FALSE)
-      fmr_fc <- (stat_fc$numberNAs + delta) / N * 100
-      lgd_fc <- max(delta, stat_fc$naGapLongest, na.rm = TRUE) / HZ
-    }
-  )
-  ifelse(
-    length(which(is.na(raw_data$W + raw_data$H2O))) == n, {
-      fmr_le <- 100
-      lgd_le <- 1800
-    }, {
-      stat_le <- imputeTS::statsNA(raw_data$W + raw_data$H2O, printOnly = FALSE)
-      fmr_le <- (stat_le$numberNAs + delta) / N * 100
-      lgd_le <- max(delta, stat_le$naGapLongest, na.rm = TRUE) / HZ
-    }
-  )
-
-
-  L <- 25 ## lag max for LSR test
-  ifelse(
-    is.null(raw_data$V) | length(which(is.na(raw_data$V))) > N * 0.95, {
-      IPT_v <- rep(NA, 8)
-    }, {
-      IPT_v <- inst_prob_test(raw_data$V)
-    }
-  )
-
-  ifelse(
-    fmr_h > 15 | lgd_h > 180, {
-      D0_h <- NA
-      lrt_h <- NA
-      IPT_w <- rep(NA, 8)
-      IPT_ts <- rep(NA, 8)
-      M98_h <- NA
-      COV_wts <- NA
-      SADiag <- NA
-    }, {
+  }
+  
+  
+  L <- 25 # lag max for LSR test
+  ccf2 <- purrr::partial(ccf, lag.max = L, plot = FALSE, na.action = na.pass)
+  
+  if (is.null(raw_data$V) | length(which(is.na(raw_data$V))) > N * 0.95) {
+    ipt_v <- rep(NA, 8)
+  } else {
+    ipt_v <- inst_prob_test(raw_data$V)
+  }
+  
+  if (fmr[1] > 15 | lgd[1] > 180) {
+    ipt_w <- rep(NA, 8)
+    SADiag <- NA
+  } else {
+    ipt_w <- inst_prob_test(raw_data$W)
+    SADiag <- length(which(raw_data$SA_DIAG == 0))
+  }
+  
+  D0 <- vctrs::vec_init(NA, length(fluxes))
+  lrt <- vctrs::vec_init(NA, length(fluxes))
+  ipt <- vctrs::vec_init(list(rep(NA, 8)), length(fluxes))
+  M98 <- vctrs::vec_init(NA, length(fluxes))
+  cov <- vctrs::vec_init(NA, length(fluxes))
+  for (i in 1:length(fluxes)) {
+    if (fmr[i] <= 15 | lgd[i] <= 180) {
       ind_w <- which(diff(raw_data$W) == 0) + 1
-      ind_ts <- which(diff(raw_data$T_SONIC) == 0) + 1
-      D0_h <- max(length(ind_w), length(ind_ts))
-      CORori <- ccf(
-        raw_data$W, raw_data$T_SONIC, na.action = na.pass, L, plot = FALSE
-      )$acf
-      ifelse(
-        D0_h < N * 0.9, {
-          ifelse(
-            D0_h > 0, {
-            CORsub <- ccf(
-              replace(raw_data$W, ind_w, NA), 
-              replace(raw_data$T_SONIC, ind_ts, NA), 
-              na.action = na.pass, L, plot = FALSE
-            )$acf
-            lrt_h <- summary(lm(CORori ~ CORsub - 1))$r.squared
-            },
-            lrt_h <- 1
-            )
-        },
-        lrt_h <- -1
-      )
-      IPT_w <- inst_prob_test(raw_data$W)
-      IPT_ts <- inst_prob_test(raw_data$T_SONIC)
-      M98_h <- mahrt(data.frame(raw_data$W, raw_data$T_SONIC))
-      COV_wts <- cov(raw_data$W, raw_data$T_SONIC, use = "complete.obs")
-      SADiag <- length(which(raw_data$SA_DIAG == 0))
+      ind_f <- which(diff(raw_data[, fluxes[i]]) == 0) + 1
+      D0[i] <- max(length(ind_w), length(ind_f))
+      cor_ori <- ccf2(raw_data$W, raw_data[, fluxes[i]])
+      if (D0[i] < N * 0.9 & D0[i] > 0) {
+        cor_sub <- ccf2(
+          replace(raw_data$W, ind_w, NA), 
+          replace(raw_data[, fluxes[i]], ind_f, NA)
+        )
+        lrt[i] <- summary(lm(cor_ori$acf ~ cor_sub$acf - 1))$r.squared
+      } else if (D0[i] < N * 0.9) {
+        lrt[i] <- 1
+      } else {
+        lrt[i] <- -1
+      }
+      ipt[i] <- inst_prob_test(raw_data[, fluxes[i]])
+      M98[i] <- mahrt(data.frame(raw_data$W, raw_data[, fluxes[i]]))
+      cov[i] <- cov(raw_data$W, raw_data[, fluxes[i]], use = "complete.obs")
     }
-  )
-
-  ifelse(
-    fmr_fc > 15 | lgd_fc > 180, {
-      D0_fc <- NA
-      lrt_fc <- NA
-      IPT_co2 <- rep(NA, 8)
-      M98_fc <- NA
-      COV_wco2 <- NA
-    }, {
-      ind_w <- which(diff(raw_data$W) == 0) + 1
-      ind_co2 <- which(diff(raw_data$CO2) == 0) + 1
-      D0_fc <- max(length(ind_w), length(ind_co2))
-      CORori <- ccf(
-        raw_data$W, raw_data$CO2, na.action = na.pass, L, plot = FALSE
-      )$acf
-      ifelse(
-        D0_fc < N * 0.9, {
-          ifelse(
-            D0_fc > 0, {
-              CORsub <- ccf(
-                replace(raw_data$W, ind_w, NA), 
-                replace(raw_data$CO2, ind_co2, NA), 
-                na.action = na.pass, L, plot = FALSE
-              )$acf
-              lrt_fc <- summary(lm(CORori ~ CORsub - 1))$r.squared
-            },
-            lrt_fc <- 1
-          )
-        },
-        lrt_fc <- -1
-      )
-
-      IPT_co2 <- inst_prob_test(raw_data$CO2)
-      M98_fc <- mahrt(data.frame(raw_data$W, raw_data$CO2))
-      COV_wco2 <- cov(raw_data$W, raw_data$CO2, use = "complete.obs")
-    }
-  )
-
-  ifelse(
-    fmr_le > 15 | lgd_le > 180, {
-      D0_le <- NA
-      lrt_le <- NA
-      IPT_h2o <- rep(NA, 8)
-      M98_le <- NA
-      COV_wh2o <- NA
-    }, {
-      ind_w <- which(diff(raw_data$W) == 0) + 1
-      ind_h2o <- which(diff(raw_data$H2O) == 0) + 1
-      D0_le <- max(length(ind_w), length(ind_h2o))
-      CORori <- ccf(
-        raw_data$W, raw_data$H2O, na.action = na.pass, L, plot = FALSE
-      )$acf
-      ifelse(
-        D0_le < N * 0.9, {
-          ifelse(
-            D0_le > 0, {
-              CORsub <- ccf(
-                replace(raw_data$W, ind_w, NA), 
-                replace(raw_data$H2O, ind_h2o, NA), 
-                na.action = na.pass, L, plot = FALSE
-              )$acf
-              lrt_le <- summary(lm(CORori ~ CORsub - 1))$r.squared
-            },
-            lrt_le <- 1
-          )
-        },
-        lrt_le <- -1
-      )
-      IPT_h2o <- inst_prob_test(raw_data$H2O)
-      M98_le <- mahrt(data.frame(raw_data$W, raw_data$H2O))
-      COV_wh2o <- cov(raw_data$W, raw_data$H2O, use = "complete.obs")
-    }
-  )
-
-
+  }
+  
+  
+  
   results <- unlist(c(
     tstamp, SADiag, 
-    fmr_h, lgd_h, fmr_fc, lgd_fc, fmr_le, lgd_le,
-    IPT_v, IPT_w,
-    IPT_ts, COV_wts, D0_h, lrt_h, M98_h,
-    IPT_co2, COV_wco2, D0_fc, lrt_fc, M98_fc,
-    IPT_h2o, COV_wh2o, D0_le, lrt_le, M98_le
+    fmr[1], lgd[1], fmr[2], lgd[2], fmr[3], lgd[3], fmr[4], lgd[4],
+    ipt_v, ipt_w,
+    ipt[1], cov[1], D0[1], lrt[1], M98[1],
+    ipt[2], cov[2], D0[2], lrt[2], M98[2],
+    ipt[3], cov[3], D0[3], lrt[3], M98[3],
+    ipt[4], cov[4], D0[4], lrt[4], M98[4]
   ), use.names = FALSE)
+  
+  ipt_names <- c("Skew", "Kurt", "KID0", "KID1", "HF5", "HF10", "HD5", "HD10")
 
   names(results) <- c(
     "TSTAMP", "SADiag", 
-    "FMR_H", "LGD_H", "FMR_Fc", "LGD_Fc", "FMR_LE", "LGD_LE",
-    paste0(
-      c("Skew", "Kurt", "KID0", "KID1", "HF5", "HF10", "HD5", "HD10"), "_v"
-    ),
-    paste0(
-      c("Skew", "Kurt", "KID0", "KID1", "HF5", "HF10", "HD5", "HD10"), "_w"
-    ),
-    paste0(
-      c("Skew", "Kurt", "KID0", "KID1", "HF5", "HF10", "HD5", "HD10"), "_ts"
-    ), 
-    "COV_wts", "N0_H", "LSR_H", "M98_H",
-    paste0(
-      c("Skew", "Kurt", "KID0", "KID1", "HF5", "HF10", "HD5", "HD10"), "_co2"
-    ), 
-    "COV_wco2", "N0_Fc", "LSR_Fc", "M98_Fc",
-    paste0(
-      c("Skew", "Kurt", "KID0", "KID1", "HF5", "HF10", "HD5", "HD10"), "_h2o"
-    ), 
-    "COV_wh2o", "N0_LE", "LSR_LE", "M98_LE"
+    "FMR_H", "LGD_H", "FMR_Fc", "LGD_Fc", "FMR_LE", "LGD_LE", "FMR_Fch4", "LGD_Fch4",
+    paste0(ipt_names, "_v"),
+    paste0(ipt_names, "_w"),
+    paste0(ipt_names, "_ts"), "COV_wts", "N0_H", "LSR_H", "M98_H",
+    paste0(ipt_names, "_co2"), "COV_wco2", "N0_Fc", "LSR_Fc", "M98_Fc",
+    paste0(ipt_names, "_h2o"), "COV_wh2o", "N0_LE", "LSR_LE", "M98_LE",
+    paste0(ipt_names, "_ch4"), "COV_wch4", "N0_Fch4", "LSR_Fch4", "M98_Fch4"
   )
 
   if (!is.null(path_output) & !is.null(file_name)) {
