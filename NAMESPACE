@@ -1,12 +1,12 @@
 ##exportPattern("^[[:alpha:]]+")
 
- export(cleanFlux,
+ export(clean_flux,
 	ecworkset,
 	eddypro_run,
 	get_md,
 	inst_prob_test,
 	mahrt,
-	qcStat)
+	qc_stat)
 	
 import(utils)
 import(bit64)
