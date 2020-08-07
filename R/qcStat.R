@@ -1,26 +1,33 @@
 
 qc_stat <- function(path_rawdata, ext_tstamp = c("START", "END"), 
                     path_output = NULL, file_name = NULL) {
-  
-  if (ext_tstamp == "START") {
-    tstamp <- as.character(format(strptime(
-      stringr::str_sub(path_rawdata, -20, -9), format = "%Y%m%d%H%M", tz = "GMT"
-    ), "%Y%m%d%H%M", tz = "GMT"))
-  } 
-  if (ext_tstamp == "END") {
-    tstamp <- as.character(format(strptime(
-      stringr::str_sub(path_rawdata, -20, -9), format = "%Y%m%d%H%M", tz = "GMT"
-    ) - 1800, "%Y%m%d%H%M", tz = "GMT"))
-  } 
 
   ##############################################################################
   # 	Raw Data Processing
   ##############################################################################
 
-  raw_data <- data.table::fread(
-    path_rawdata, sep = ",", header = TRUE, data.table = FALSE, 
-    na.strings = c("-9999")
-  )
+  # Read data if passed as a file connection
+  if (inherits(path_rawdata, "data.frame")) {
+    raw_data <- as.data.frame(path_rawdata)
+    tstamp <- as.character(lubridate::ymd_hms(stringr::str_sub(
+      paste(raw_data$DATE[1], raw_data$TIME[1]), 1, -5
+    ), tz = "GMT"))
+  } else {
+    if (ext_tstamp == "START") {
+      tstamp <- as.character(lubridate::ymd_hms(
+        stringr::str_sub(path_rawdata, -30, -14), tz = "GMT"
+      ))
+    } 
+    if (ext_tstamp == "END") {
+      tstamp <- as.character(lubridate::ymd_hms(
+        stringr::str_sub(path_rawdata, -30, -14), tz = "GMT"
+      ) - 1800)
+    }
+    raw_data <- data.table::fread(
+      path_rawdata, sep = ",", header = TRUE, data.table = FALSE, 
+      na.strings = c("-9999")
+    )
+  }
   
   n <- nrow(raw_data)
   HZ <- if (n > 19000) 20 else 10
@@ -28,18 +35,19 @@ qc_stat <- function(path_rawdata, ext_tstamp = c("START", "END"),
   delta <- if (n < N) N - n else 0
   
   fluxes <- c(H = "T_SONIC", FC = "CO2", LE = "H2O", Fch4 = "CH4")
-  fmr <- vctrs::vec_init(numeric(), length(fluxes))
-  lgd <- vctrs::vec_init(numeric(), length(fluxes))
-  for (i in 1:length(fluxes)) {
-    if (length(which(is.na(raw_data$W + raw_data[, fluxes[i]]))) == n) {
+  nf <- length(fluxes)
+  fmr <- vctrs::vec_init(numeric(), nf)
+  lgd <- vctrs::vec_init(numeric(), nf)
+  for (i in 1:nf) {
+    if (length(which(is.na(raw_data$W + raw_data[[fluxes[i]]]))) == n) {
       fmr[i] <- 100
       lgd[i] <- 1800
     } else {
       stat_temp <- imputeTS::statsNA(
-        raw_data$W + raw_data[, fluxes[i]], printOnly = FALSE
+        raw_data$W + raw_data[[fluxes[i]]], printOnly = FALSE
       )
       fmr[i] <- (stat_temp$numberNAs + delta) / N * 100
-      lg[i] <- max(delta, stat_temp$naGapLongest, na.rm = TRUE) / HZ
+      lgd[i] <- max(delta, stat_temp$naGapLongest, na.rm = TRUE) / HZ
     }
   }
   
@@ -61,21 +69,22 @@ qc_stat <- function(path_rawdata, ext_tstamp = c("START", "END"),
     SADiag <- length(which(raw_data$SA_DIAG == 0))
   }
   
-  D0 <- vctrs::vec_init(NA, length(fluxes))
-  lrt <- vctrs::vec_init(NA, length(fluxes))
-  ipt <- vctrs::vec_init(list(rep(NA, 8)), length(fluxes))
-  M98 <- vctrs::vec_init(NA, length(fluxes))
-  cov <- vctrs::vec_init(NA, length(fluxes))
-  for (i in 1:length(fluxes)) {
+  D0 <- vctrs::vec_init(NA, nf)
+  lrt <- vctrs::vec_init(NA, nf)
+  ipt <- purrr::map(vctrs::vec_init(list(), nf), ~ vctrs::vec_init(NA, 8))
+  ipt <- vctrs::vec_init(list(rep(NA, 8)), nf)
+  M98 <- vctrs::vec_init(NA, nf)
+  cov <- vctrs::vec_init(NA, nf)
+  for (i in 1:nf) {
     if (fmr[i] <= 15 | lgd[i] <= 180) {
       ind_w <- which(diff(raw_data$W) == 0) + 1
-      ind_f <- which(diff(raw_data[, fluxes[i]]) == 0) + 1
+      ind_f <- which(diff(raw_data[[fluxes[i]]]) == 0) + 1
       D0[i] <- max(length(ind_w), length(ind_f))
-      cor_ori <- ccf2(raw_data$W, raw_data[, fluxes[i]])
+      cor_ori <- ccf2(raw_data$W, raw_data[[fluxes[i]]])
       if (D0[i] < N * 0.9 & D0[i] > 0) {
         cor_sub <- ccf2(
           replace(raw_data$W, ind_w, NA), 
-          replace(raw_data[, fluxes[i]], ind_f, NA)
+          replace(raw_data[[fluxes[i]]], ind_f, NA)
         )
         lrt[i] <- summary(lm(cor_ori$acf ~ cor_sub$acf - 1))$r.squared
       } else if (D0[i] < N * 0.9) {
@@ -83,9 +92,9 @@ qc_stat <- function(path_rawdata, ext_tstamp = c("START", "END"),
       } else {
         lrt[i] <- -1
       }
-      ipt[i] <- inst_prob_test(raw_data[, fluxes[i]])
-      M98[i] <- mahrt(data.frame(raw_data$W, raw_data[, fluxes[i]]))
-      cov[i] <- cov(raw_data$W, raw_data[, fluxes[i]], use = "complete.obs")
+      ipt[[i]] <- inst_prob_test(raw_data[[fluxes[i]]])
+      M98[i] <- mahrt(cbind(raw_data$W, raw_data[[fluxes[i]]]))
+      cov[i] <- cov(raw_data$W, raw_data[[fluxes[i]]], use = "complete.obs")
     }
   }
   
